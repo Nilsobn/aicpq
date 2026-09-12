@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { PageHeader, StatusBadge } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -8,97 +8,147 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatEUR } from "@/lib/data/catalog-client";
 
+type OptionValue = {
+  code: string;
+  name: string;
+  description: string | null;
+  price_cents: number;
+};
+
+type OptionGroup = {
+  id: string;
+  code: string;
+  name: string;
+  required: boolean;
+  values: OptionValue[];
+};
+
 type CatalogPayload = {
   products: Array<{ id: string; sku: string; name: string }>;
   detail: {
     product: { id: string; sku: string; name: string };
     variants: Array<{ sku: string; name: string }>;
-    optionGroups: Array<{
-      id: string;
-      code: string;
-      name: string;
-      required: boolean;
-      values: Array<{
-        code: string;
-        name: string;
-        description: string | null;
-        price_cents: number;
-      }>;
-    }>;
+    optionGroups: OptionGroup[];
     basePriceCents: number;
     optionPrices: Record<string, number>;
-    rules: Array<{
-      code: string;
-      rule_type: string;
-      severity: "error" | "warning" | "info";
-      expression: Record<string, unknown>;
-      explanation_template: string | null;
-      source_excerpt?: string | null;
-    }>;
   } | null;
 };
 
-export default function ConfiguratorPage() {
+type EvalResult = {
+  valid: boolean;
+  messages: Array<{ rule: string; severity: string; text: string }>;
+  breakdown: {
+    base: number;
+    options: Array<{ code: string; cents: number }>;
+    total: number;
+    currency?: string;
+  };
+  savedId?: string | null;
+  error?: string;
+};
+
+export default function ConfiguratorClient() {
   const params = useSearchParams();
   const initialSku = params.get("sku") || "XP-120";
+
   const [sku, setSku] = useState(initialSku);
   const [data, setData] = useState<CatalogPayload | null>(null);
+  const [loadingCatalog, setLoadingCatalog] = useState(true);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+
   const [variant, setVariant] = useState("");
   const [selected, setSelected] = useState<Record<string, string>>({});
   const [media, setMedia] = useState("Wasser");
   const [temp, setTemp] = useState(40);
   const [name, setName] = useState("Neue Konfiguration");
   const [customer, setCustomer] = useState("");
-  const [result, setResult] = useState<{
-    valid: boolean;
-    messages: Array<{ rule: string; severity: string; text: string }>;
-    breakdown: { base: number; options: Array<{ code: string; cents: number }>; total: number };
-  } | null>(null);
-  const [saving, setSaving] = useState(false);
+
+  const [result, setResult] = useState<EvalResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    setLoadingCatalog(true);
+    setCatalogError(null);
+    setResult(null);
+
     fetch(`/api/configurator?sku=${encodeURIComponent(sku)}`)
-      .then((r) => r.json())
-      .then((payload: CatalogPayload) => {
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Katalogfehler (${res.status})`);
+        return res.json() as Promise<CatalogPayload>;
+      })
+      .then((payload) => {
+        if (cancelled) return;
         setData(payload);
-        const firstVariant = payload.detail?.variants[0]?.sku || "";
+        const firstVariant = payload.detail?.variants?.[0]?.sku || "";
         setVariant(firstVariant);
         const defaults: Record<string, string> = {};
-        payload.detail?.optionGroups.forEach((g) => {
-          if (g.values[0]) defaults[g.code] = g.values[0].code;
-        });
+        for (const g of payload.detail?.optionGroups || []) {
+          if (g.values?.[0]?.code) defaults[g.code] = g.values[0].code;
+        }
         setSelected(defaults);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setCatalogError(err instanceof Error ? err.message : "Katalog konnte nicht geladen werden");
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingCatalog(false);
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [sku]);
 
-  const optionCodes = useMemo(() => Object.values(selected), [selected]);
+  const optionCodes = useMemo(() => Object.values(selected).filter(Boolean), [selected]);
 
-  async function validate(save = false) {
-    setSaving(save);
-    setSaveMsg(null);
-    const res = await fetch("/api/configurator", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sku,
-        selection: {
-          variant,
-          options: optionCodes,
-          attrs: { media, media_temp_c: temp },
-        },
-        save,
-        name,
-        customerName: customer,
-      }),
-    });
-    const json = await res.json();
-    setResult(json);
-    if (save) {
-      setSaveMsg(json.savedId ? "Konfiguration gespeichert." : json.error || "Speichern fehlgeschlagen");
-    }
-    setSaving(false);
-  }
+  const runCheck = useCallback(
+    async (save: boolean) => {
+      setBusy(true);
+      setActionError(null);
+      setSaveMsg(null);
+      try {
+        const res = await fetch("/api/configurator", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sku,
+            selection: {
+              variant,
+              options: optionCodes,
+              attrs: { media, media_temp_c: temp },
+            },
+            save,
+            name,
+            customerName: customer,
+          }),
+        });
+        const json = (await res.json()) as EvalResult;
+        if (!res.ok) {
+          throw new Error(json.error || `Prüfung fehlgeschlagen (${res.status})`);
+        }
+        if (!json.breakdown) {
+          throw new Error("Ungültige API-Antwort: keine Preisaufschlüsselung");
+        }
+        setResult(json);
+        if (save) {
+          setSaveMsg(
+            json.savedId
+              ? "Konfiguration gespeichert."
+              : json.error || "Speichern fehlgeschlagen",
+          );
+        }
+      } catch (err: unknown) {
+        setActionError(err instanceof Error ? err.message : "Unbekannter Fehler");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [sku, variant, optionCodes, media, temp, name, customer],
+  );
 
   return (
     <div>
@@ -107,13 +157,21 @@ export default function ConfiguratorPage() {
         description="Geführte Auswahl mit Regelprüfung und Preisaufschlüsselung auf freigegebenen Daten."
       />
 
+      {catalogError ? (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          {catalogError}
+        </div>
+      ) : null}
+
       <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
         <section className="space-y-5 rounded-xl border bg-white p-5 shadow-sm">
           <div className="space-y-2">
-            <Label>Produkt</Label>
+            <Label htmlFor="product">Produkt</Label>
             <select
+              id="product"
               className="h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
               value={sku}
+              disabled={loadingCatalog}
               onChange={(e) => setSku(e.target.value)}
             >
               {(data?.products || [{ sku: "XP-120", name: "Kreiselpumpe XP-120", id: "1" }]).map(
@@ -156,7 +214,7 @@ export default function ConfiguratorPage() {
                 {g.required ? " *" : ""}
               </Label>
               <div className="grid gap-2 sm:grid-cols-2">
-                {g.values.map((v) => (
+                {(g.values || []).map((v) => (
                   <button
                     key={v.code}
                     type="button"
@@ -186,8 +244,9 @@ export default function ConfiguratorPage() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label>Medium</Label>
+              <Label htmlFor="media">Medium</Label>
               <select
+                id="media"
                 className="h-9 w-full rounded-lg border px-2.5 text-sm"
                 value={media}
                 onChange={(e) => setMedia(e.target.value)}
@@ -198,8 +257,9 @@ export default function ConfiguratorPage() {
               </select>
             </div>
             <div className="space-y-2">
-              <Label>Medientemperatur (°C)</Label>
+              <Label htmlFor="temp">Medientemperatur (°C)</Label>
               <Input
+                id="temp"
                 type="number"
                 value={temp}
                 onChange={(e) => setTemp(Number(e.target.value))}
@@ -209,12 +269,17 @@ export default function ConfiguratorPage() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label>Bezeichnung</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} />
+              <Label htmlFor="cfg-name">Bezeichnung</Label>
+              <Input
+                id="cfg-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
             </div>
             <div className="space-y-2">
-              <Label>Kunde</Label>
+              <Label htmlFor="customer">Kunde</Label>
               <Input
+                id="customer"
                 value={customer}
                 onChange={(e) => setCustomer(e.target.value)}
                 placeholder="optional"
@@ -223,11 +288,28 @@ export default function ConfiguratorPage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => validate(false)}>Regelprüfung</Button>
-            <Button variant="outline" disabled={saving} onClick={() => validate(true)}>
+            <Button
+              type="button"
+              disabled={busy || loadingCatalog || !data?.detail}
+              onClick={() => void runCheck(false)}
+            >
+              {busy ? "Prüft…" : "Regelprüfung"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy || loadingCatalog || !data?.detail}
+              onClick={() => void runCheck(true)}
+            >
               Speichern
             </Button>
           </div>
+
+          {actionError ? (
+            <p className="text-sm text-red-700" role="alert">
+              {actionError}
+            </p>
+          ) : null}
           {saveMsg ? <p className="text-sm text-teal-800">{saveMsg}</p> : null}
         </section>
 
@@ -247,7 +329,9 @@ export default function ConfiguratorPage() {
                 <ul className="mt-3 space-y-1 text-sm text-slate-600">
                   <li className="flex justify-between">
                     <span>Basis</span>
-                    <span className="tabular-nums">{formatEUR(result.breakdown.base)}</span>
+                    <span className="tabular-nums">
+                      {formatEUR(result.breakdown.base)}
+                    </span>
                   </li>
                   {result.breakdown.options.map((o) => (
                     <li key={o.code} className="flex justify-between">
@@ -264,7 +348,7 @@ export default function ConfiguratorPage() {
                   ) : (
                     result.messages.map((m) => (
                       <div
-                        key={m.rule + m.text}
+                        key={`${m.rule}-${m.text}`}
                         className={`rounded-md border px-3 py-2 text-sm ${
                           m.severity === "error"
                             ? "border-red-200 bg-red-50 text-red-900"

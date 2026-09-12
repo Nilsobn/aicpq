@@ -72,8 +72,14 @@ export async function POST(req: Request) {
     detail.prices.find((p) => p.product_id === detail.product.id)?.amount_cents ??
     0;
 
+  const selection = body.selection ?? {
+    variant: body.variant,
+    options: body.options ?? [],
+    attrs: body.attrs ?? {},
+  };
+
   const evaluated = evaluateConfiguration({
-    selection: body.selection,
+    selection,
     rules,
     basePriceCents: basePrice,
     optionPrices,
@@ -98,7 +104,7 @@ export async function POST(req: Request) {
         body.name || `Konfiguration ${sku}`,
         body.customerName || null,
         evaluated.valid ? "valid" : "invalid",
-        JSON.stringify(body.selection),
+        JSON.stringify(selection),
         JSON.stringify(evaluated.breakdown),
         JSON.stringify({ ok: evaluated.valid, messages: evaluated.messages }),
         evaluated.breakdown.total,
