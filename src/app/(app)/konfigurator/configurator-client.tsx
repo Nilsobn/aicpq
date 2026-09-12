@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { PageHeader, StatusBadge } from "@/components/layout/page-header";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatEUR } from "@/lib/data/catalog-client";
@@ -291,7 +290,7 @@ export default function ConfiguratorClient() {
             <button
               type="button"
               data-testid="configurator-check"
-              disabled={busy}
+              disabled={busy || loadingCatalog || !data?.detail}
               onClick={() => void runCheck(false)}
               className="inline-flex h-9 items-center justify-center rounded-lg bg-slate-900 px-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:pointer-events-none disabled:opacity-50"
             >
@@ -300,7 +299,7 @@ export default function ConfiguratorClient() {
             <button
               type="button"
               data-testid="configurator-save"
-              disabled={busy}
+              disabled={busy || loadingCatalog || !data?.detail}
               onClick={() => void runCheck(true)}
               className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 transition hover:bg-slate-50 disabled:pointer-events-none disabled:opacity-50"
             >
