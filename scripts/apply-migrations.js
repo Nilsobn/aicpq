@@ -4,7 +4,7 @@ const path = require("path");
 
 const DATABASE_URL =
   process.env.DATABASE_URL ||
-  "postgresql://postgres.yqjlmimksyurbccnqpsz:Nils%3F190301_@aws-0-eu-central-1.pooler.supabase.com:6543/postgres";
+  "postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-eu-central-1.pooler.supabase.com:6543/postgres";
 
 async function run() {
   const client = new Client({
