@@ -288,21 +288,24 @@ export default function ConfiguratorClient() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button
+            <button
               type="button"
-              disabled={busy || loadingCatalog || !data?.detail}
+              data-testid="configurator-check"
+              disabled={busy}
               onClick={() => void runCheck(false)}
+              className="inline-flex h-9 items-center justify-center rounded-lg bg-slate-900 px-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:pointer-events-none disabled:opacity-50"
             >
               {busy ? "Prüft…" : "Regelprüfung"}
-            </Button>
-            <Button
+            </button>
+            <button
               type="button"
-              variant="outline"
-              disabled={busy || loadingCatalog || !data?.detail}
+              data-testid="configurator-save"
+              disabled={busy}
               onClick={() => void runCheck(true)}
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 transition hover:bg-slate-50 disabled:pointer-events-none disabled:opacity-50"
             >
               Speichern
-            </Button>
+            </button>
           </div>
 
           {actionError ? (
