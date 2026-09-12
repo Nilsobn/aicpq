@@ -2,12 +2,14 @@ import { Pool } from "pg";
 
 const globalForPg = globalThis as unknown as { aicpqPool?: Pool };
 
+/** Demo fallback when Vercel env is not set yet. Prefer DATABASE_URL in production. */
+const DEMO_DATABASE_URL =
+  "postgresql://postgres.yqjlmimksyurbccnqpsz:Nils%3F190301_@aws-0-eu-central-1.pooler.supabase.com:6543/postgres";
+
 export function getPool() {
   if (!globalForPg.aicpqPool) {
     globalForPg.aicpqPool = new Pool({
-      connectionString:
-        process.env.DATABASE_URL ||
-        "postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-eu-central-1.pooler.supabase.com:6543/postgres",
+      connectionString: process.env.DATABASE_URL || DEMO_DATABASE_URL,
       ssl: { rejectUnauthorized: false },
       max: 5,
     });

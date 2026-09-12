@@ -3,15 +3,66 @@ import { Button } from "@/components/ui/button";
 import { getPool } from "@/lib/db";
 import { formatEUR } from "@/lib/data/catalog";
 
+export const dynamic = "force-dynamic";
+
+type Plan = {
+  id: string;
+  name: string;
+  description: string;
+  price_monthly_cents: number;
+  features: string[];
+};
+
+const FALLBACK_PLANS: Plan[] = [
+  {
+    id: "starter",
+    name: "Starter",
+    description: "Für kleine Produktteams",
+    price_monthly_cents: 19900,
+    features: ["1 Tenant", "5 Nutzer", "Assistent (begrenzt)", "CSV Export"],
+  },
+  {
+    id: "professional",
+    name: "Professional",
+    description: "Standard für Mittelstand",
+    price_monthly_cents: 59900,
+    features: [
+      "Unbegrenzte Produkte",
+      "Regel-Engine",
+      "KI-Prüfung",
+      "Diffs & Versionierung",
+      "Konfigurator",
+    ],
+  },
+  {
+    id: "enterprise",
+    name: "Enterprise",
+    description: "Konzern & Multi-Werk",
+    price_monthly_cents: 149900,
+    features: [
+      "SSO vorbereitet",
+      "Custom Policies",
+      "Audit Export",
+      "Priority Support",
+      "IONOS Self-Host",
+    ],
+  },
+];
+
+async function loadPlans(): Promise<Plan[]> {
+  try {
+    const pool = getPool();
+    const { rows } = await pool.query<Plan>(
+      `select * from plans where is_public = true order by sort_order`,
+    );
+    return rows.length > 0 ? rows : FALLBACK_PLANS;
+  } catch {
+    return FALLBACK_PLANS;
+  }
+}
+
 export default async function PricingPage() {
-  const pool = getPool();
-  const { rows: plans } = await pool.query<{
-    id: string;
-    name: string;
-    description: string;
-    price_monthly_cents: number;
-    features: string[];
-  }>(`select * from plans where is_public = true order by sort_order`);
+  const plans = await loadPlans();
 
   return (
     <div className="min-h-screen bg-[#f4f6f8]">
